@@ -411,7 +411,7 @@ dialog[open]::backdrop {
 #server-list > span[online] {
   --status: var(--valid);
 }
-#server-list > span[selected] > button:not(.del) {
+#server-list > span[selected] > button:not(.del):not(.retry) {
   border-color: var(--accent);
   background-color: var(--bg-accent);
 }
@@ -427,11 +427,11 @@ dialog[open]::backdrop {
   outline: none;
   transition: border-color var(--time), background var(--time), transform var(--time);
 }
-#server-list button:not(.del) {
+#server-list button:not(.del):not(.retry) {
   flex: 1;
   overflow: hidden;
 }
-#server-list button:not(.del):hover {
+#server-list button:not(.del):not(.retry):hover {
   border-color: color-mix(in oklab, var(--accent) 45%, var(--hairline));
   background-color: var(--bg-accent);
 }
@@ -439,7 +439,7 @@ dialog[open]::backdrop {
   border-color: color-mix(in oklab, var(--accent) 60%, var(--hairline));
   box-shadow: 0 0 0 3px color-mix(in oklab, var(--accent) 16%, transparent);
 }
-#server-list button:not(.del) > span:first-child {
+#server-list button:not(.del):not(.retry) > span:first-child {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
