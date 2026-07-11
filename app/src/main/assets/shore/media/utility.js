@@ -1,0 +1,637 @@
+const Permissions = {
+  OWNER: 1,
+  ADMIN: 2,
+  SEND_MESSAGES: 4,
+  MANAGE_MESSAGES: 8,
+  MANAGE_MEMBERS: 16,
+  MANAGE_CHANNEL: 32,
+  MANAGE_PERMISSION: 64
+};
+const OwnerAlt = 127;
+const AdminAlt = 126;
+const DummyUser = {
+  display: 'Reserved',
+  username: 'r',
+  pfp: null
+};
+const twemojiConfig = {
+  size: 'svg',
+  ext: '.svg',
+  base: 'https://raw.githubusercontent.com/twitter/twemoji/refs/heads/master/assets/'
+};
+const TypeIcons = [
+  '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 256 256" class="type"><rect x="103" width="50" height="256" rx="25"/><rect y="103" width="256" height="50" rx="25"/></svg>',
+  '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 256 256" class="type"><path fill-rule="evenodd" clip-rule="evenodd" d="M128 128C163.346 128 192 99.3462 192 64C192 28.6538 163.346 0 128 0C92.6538 0 64 28.6538 64 64C64 99.3462 92.6538 128 128 128ZM151 146H148H108H105C49.7715 146 5 190.772 5 246V256H108H148H251V246C251 190.772 206.228 146 151 146Z"/></svg>',
+  '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 256 256" class="type"><circle cx="60" cy="102" r="34" filter="brightness(0.75)"/><path d="M0 196C0 177.222 15.2223 162 34 162V162H102V162C120.778 162 136 177.222 136 196V196.467V256H0V196.467V196Z" filter="brightness(0.75)"/><circle cx="169" cy="50" r="50"/><path d="M81 180C81 155.838 100.588 136 124.75 136H212.25C236.412 136 256 155.838 256 180V256H81V180Z"/></svg>',
+  '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 256 256" class="type"><rect x="7" y="76" width="25" height="104" rx="12.5"/><path d="M160 207C160 232.405 139.853 253 115 253C90.1472 253 70 232.405 70 207C70 181.595 90.1472 161 115 161C139.853 161 160 181.595 160 207ZM88 207C88 222.243 100.088 234.6 115 234.6C129.912 234.6 142 222.243 142 207C142 191.757 129.912 179.4 115 179.4C100.088 179.4 88 191.757 88 207Z"/><path d="M219 12C219 5.37258 224.373 0 231 0H239C245.627 0 251 5.37258 251 12V244C251 250.627 245.627 256 239 256H231C224.373 256 219 250.627 219 244V12Z"/><path d="M41 90.9502C41 82.374 46.4679 74.7524 54.592 72.0045L232 12V244L54.592 183.995C46.4679 181.248 41 173.626 41 165.05V90.9502Z"/></svg>'
+];
+
+Object.prototype.merge = (a,b)=>{
+  a ??= {};
+  b ??= {};
+  Object.keys(b).forEach(k=>a[k]=b[k]);
+  return a;
+}
+
+function getCurrentServerUrl() {
+  return window.servers.find(srv=>srv.id===window.currentServer).url;
+}
+
+function loggedIn() {
+  let options = [!!localStorage.getItem(window.currentServer+'-sessionToken'), !!localStorage.getItem(window.currentServer+'-publicKey'), !!localStorage.getItem(window.currentServer+'-privateKey')];
+  return options.filter(o=>!o).length<1;
+}
+function logout() {
+  backendfetch('/api/v1/me/logout', {
+    method: 'DELETE'
+  });
+  localStorage.removeItem(window.currentServer+'-sessionToken');
+  window.servers[window.servers.findIndex(srv=>srv.id===window.currentServer)].name = null;
+  localStorage.setItem('servers', JSON.stringify(window.servers));
+  localStorage.removeItem(window.currentServer+'-username');
+  location.reload();
+}
+function logoutall() {
+  backendfetch('/api/v1/me/sessions', {
+    method: 'DELETE'
+  });
+  localStorage.removeItem(window.currentServer+'-sessionToken');
+  window.servers[window.servers.findIndex(srv=>srv.id===window.currentServer)].name = null;
+  localStorage.setItem('servers', JSON.stringify(window.servers));
+  location.reload();
+}
+
+function downloadKeys() {
+  let a = document.createElement('a');
+  a.download = window.username+'.keys';
+  a.href = URL.createObjectURL(new Blob([JSON.stringify({
+    publicKey: localStorage.getItem(window.currentServer+'-publicKey'),
+    privateKey: localStorage.getItem(window.currentServer+'-privateKey')
+  })], { type: 'text/plain' }));
+  a.click();
+  a.remove();
+}
+
+function hasPerm(bitfield, perm) {
+  return (bitfield & (1 << Math.log2(perm))) !== 0;
+}
+
+function sanitizeHTML(html) {
+  return html.replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&apos;');
+}
+function desanitizeHTML(html) {
+  return html.replaceAll('&apos;', "'").replaceAll('&quot;', '"').replaceAll('&gt;', '>').replaceAll('&lt;', '<').replaceAll('&amp;', '&');
+}
+function sanitizeMinimChars(text) {
+  return text.replaceAll(/[^a-zA-Z0-9_\-]/g,'');
+}
+function sanitizeAttr(inp) {
+  return sanitizeHTML(inp).replaceAll('\\', '\\\\').replaceAll(/\r?\n/g, '\\n');
+}
+function applyAccent(hex) {
+  // Clamp the chosen accent's lightness so a near-black/near-white pick can't blend into the theme (invisible buttons/text).
+  let m = (/^#?([0-9a-fA-F]{6})$/).exec(hex||'');
+  if (!m) { document.querySelector('body').style.setProperty('--accent', '#9d7bff'); return; }
+  let n = parseInt(m[1], 16), r = (n>>16&255)/255, g = (n>>8&255)/255, b = (n&255)/255;
+  let mx = Math.max(r, g, b), mn = Math.min(r, g, b), l = (mx+mn)/2, s = 0, h = 0;
+  if (mx!==mn) {
+    let d = mx-mn;
+    s = l>0.5?d/(2-mx-mn):d/(mx+mn);
+    if (mx===r) h = (g-b)/d+(g<b?6:0); else if (mx===g) h = (b-r)/d+2; else h = (r-g)/d+4;
+    h /= 6;
+  }
+  l = Math.max(0.45, Math.min(0.78, l));
+  let q = l<0.5?l*(1+s):l+s-l*s, p = 2*l-q;
+  let hue = (t)=>{ t = (t+1)%1; if (t<1/6) return p+(q-p)*6*t; if (t<1/2) return q; if (t<2/3) return p+(q-p)*(2/3-t)*6; return p; };
+  let toHex = (x)=>Math.round((s===0?l:hue(x))*255).toString(16).padStart(2, '0');
+  document.querySelector('body').style.setProperty('--accent', '#'+toHex(h+1/3)+toHex(h)+toHex(h-1/3));
+}
+window.applyAccent = applyAccent;
+function desanitizeAttr(inp) {
+  return desanitizeHTML(inp).replaceAll(/([^\\])\\n/g, '$1\n').replaceAll('\\\\','\\');
+}
+
+function bufferToBase64(buf) {
+  let bytes = new Uint8Array(buf);
+  let chunklen = 0x10000; // 64KB
+  let str = '';
+  // String.fromCharCode faster than String.fromCodePoint and we don't need the surrogates
+  for (let i=0; i<bytes.length; i+=chunklen) str += String.fromCharCode(...bytes.subarray(i,i+chunklen));
+  return btoa(str);
+}
+function base64ToBuffer(base64) {
+  const binary = atob(base64);
+  const len = binary.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes.buffer;
+}
+
+const AskModal = document.getElementById('ask');
+function ask(title, min=0, max=20, def='') {
+  let input = AskModal.querySelector('input');
+  let button = AskModal.querySelector('button.set');
+  AskModal.showModal();
+  AskModal.querySelector('h2').setAttribute('tlang', title);
+  input.value = def;
+  input.setAttribute('minlength', min);
+  input.setAttribute('maxlength', max);
+  input.focus();
+  button.setAttribute('tlang', title+'.next');
+  return new Promise((resolve, reject)=>{
+    AskModal.onclose = reject;
+    button.onclick = ()=>{
+      AskModal.close();
+      resolve(input.value);
+    };
+    input.onkeyup = (evt)=>{
+      if (evt.key!=='Enter') return;
+      button.onclick();
+    };
+  });
+}
+
+const AffirmModal = document.getElementById('affirm');
+async function affirm(title, rep='') {
+  let buttony = AffirmModal.querySelector('button.yes');
+  let buttonn = AffirmModal.querySelector('button.no');
+  let h = AffirmModal.querySelector('h2');
+  let body = AffirmModal.querySelector('p');
+  let reps = Array.isArray(rep)?rep:[rep];
+  let [ht, bt] = await Promise.all([getTranslation(title), getTranslation(title+'.body')]);
+  let hi = 0;
+  h.innerText = ht.replace(/\{\}/g, ()=>reps[hi++]??'');
+  let bi = 0;
+  body.innerText = bt.replace(/\{\}/g, ()=>reps[bi++]??'');
+  buttony.setAttribute('tlang', title+'.yes');
+  buttonn.setAttribute('tlang', title+'.no');
+  window.translate();
+  AffirmModal.showModal();
+  return new Promise((resolve, reject)=>{
+    AffirmModal.onclose = ()=>{resolve(false)};
+    AffirmModal.onkeydown = (evt)=>{
+      if (evt.key==='Enter') { evt.preventDefault(); AffirmModal.close(); resolve(true); }
+    };
+    buttonn.onclick = ()=>{
+      AffirmModal.close();
+      resolve(false);
+    };
+    buttony.onclick = ()=>{
+      AffirmModal.close();
+      resolve(true);
+    };
+  });
+}
+
+const NoticeModal = document.getElementById('notice');
+let NoticeBacklog = [];
+function notice(title, rep='', bypass=false) {
+  if (!bypass) {
+    NoticeBacklog.push([title, rep]);
+    if (NoticeBacklog.length>1) return;
+  }
+  NoticeModal.showModal();
+  let h = NoticeModal.querySelector('h3');
+  h.setAttribute('tlang', title);
+  window.translate();
+  if (rep.length) setTimeout(()=>{
+    h.innerText = h.innerText.replace('{}',rep);
+  },0);
+  NoticeModal.onclose = ()=>{
+    NoticeBacklog.shift();
+    if (NoticeBacklog.length>0) {
+      notice(NoticeBacklog[0][0], NoticeBacklog[0][1], true);
+    }
+  };
+}
+
+function smallScreen() {
+  return window.matchMedia(`(max-width: 700px)`).matches;
+}
+function saveData() {
+  if (!('connection' in navigator)) return false;
+  if (localStorage.getItem('pmedialways')==='true') return false;
+  let connection = navigator.connection;
+  return (connection.type==='cellular'||['2g','3g'].includes(connection.effectiveType));
+}
+
+function formatBytes(bytes) {
+  bytes = Number(sanitizeMinimChars(bytes.toString()))||0;
+  if (bytes === 0) return '0 Bytes';
+  const k = 1024;
+  const sizes = ['Bytes', 'KiB', 'MiB', 'GiB', 'TiB', 'PiB', 'EiB', 'ZiB', 'YiB', 'RiB', 'QiB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+}
+
+function getLanguageName(iso) {
+  const displayNames = new Intl.DisplayNames([iso], { type: 'language' });
+  let display = displayNames.of(iso);
+  return display==='tok'?'Toki Pona':display; // Tok not supported fully
+}
+function formatTime(date) {
+  let now = new Date();
+  date = new Date(date);
+  let locale = localStorage.getItem('timeUILang')==='true'?localStorage.getItem('language'):navigator.language;
+
+  let startToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  let startDate = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  let diff = Math.round((startDate-startToday) / (24*60*60*1000));
+
+  let time = new Intl.DateTimeFormat(locale, {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false
+  }).format(date);
+
+  let prefix = '';
+  if (Math.abs(diff)<=1) {
+    let ts = window.timeStrings;
+    if (ts) prefix = diff===0?ts.today:diff===-1?ts.yesterday:ts.tomorrow;
+    else prefix = new Intl.RelativeTimeFormat(locale, { numeric: 'auto' }).format(diff, 'day');
+  } else {
+    prefix = new Intl.DateTimeFormat(locale, {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric'
+    })
+      .format(date);
+  }
+  return `${prefix} ${time}`;
+}
+function formatHour(date) {
+  date = new Date(date);
+  let locale = localStorage.getItem('timeUILang')==='true'?localStorage.getItem('language'):navigator.language;
+
+  return new Intl.DateTimeFormat(locale, {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false
+  }).format(date);
+}
+function formatDuration(time) {
+  return `${time>3599?`${Math.floor(time/3600)}h `:''}${time>59?`${Math.floor(time/60)}m `:''}${Math.floor(time)%60}s`
+}
+
+const DefaultPFPRadix = 12;
+function userToDefaultPfp(user) {
+  user = (user.display??user.name??user.username).toLowerCase().replaceAll(/[^a-zA-Z0-9]/g,'');
+  return 'data:image/svg+xml,'+encodeURIComponent(window.defaultpfp
+    .replace('PFP',user.slice(0,1))
+    .replace('074104',(parseInt(user, 36)%(DefaultPFPRadix**6)).toString(DefaultPFPRadix).padStart(6, '0')));
+}
+function pfpById(id) {
+  if ((/^data:[\w\/+.-]+;\w+,.*$/).test(id)) return sanitizeAttr(id);
+  return getCurrentServerUrl()+'/pfp/'+sanitizeMinimChars(id);
+}
+
+function getNotifStateChannel(id, type) {
+  return ChannelNotifStore.get(id)??['mentions','all','mentions','mentions'][type];
+}
+const MessageTimeSeparation = 10 * 60 * 1000; // 10 mins
+function shouldHideUser(messages, i, channel) {
+  if (messages[i]._callItem||messages[i]._interactionItem||messages[i+1]?._callItem||messages[i+1]?._interactionItem) return false;
+  if (channel && messages[i+1] && ((window.callHistory?.[channel]||[]).some(h=>h.started_at>messages[i+1].timestamp&&h.started_at<messages[i].timestamp)||(window.interactionHistory?.[channel]||[]).some(h=>h.timestamp>messages[i+1].timestamp&&h.timestamp<messages[i].timestamp))) return false;
+  if (!messages[i].replied_to && messages[i+1] && messages[i+1]?.user?.username===messages[i].user.username && (messages[i].user.username!==null||(messages[i].user.username===null&&messages[i+1].user?.display===messages[i].user.display))) {
+    return (messages[i].timestamp-messages[i+1].timestamp)<MessageTimeSeparation; // Only hide is smaller than time separation
+  }
+  return false;
+}
+
+async function newRSAKeys() {
+  const keyPair = await window.crypto.subtle.generateKey({
+      name: 'RSA-OAEP',
+      modulusLength: 2048,
+      publicExponent: new Uint8Array([1, 0, 1]),
+      hash: 'SHA-256'
+    },
+    true,
+    ['encrypt', 'decrypt']);
+
+  let exportedPublicKey = await window.crypto.subtle.exportKey('spki', keyPair.publicKey);
+  let exportedPrivateKey = await window.crypto.subtle.exportKey('pkcs8', keyPair.privateKey);
+
+  localStorage.setItem(window.currentServer+'-publicKey', bufferToBase64(exportedPublicKey));
+  localStorage.setItem(window.currentServer+'-privateKey', bufferToBase64(exportedPrivateKey));
+  delete window.keyPair[window.currentServer];
+}
+async function OAEPtoPSS(key, private=false) {
+  let exported = await window.crypto.subtle.exportKey((private?'pkcs8':'spki'), key);  
+  let imported = await window.crypto.subtle.importKey((private?'pkcs8':'spki'),
+    exported,
+    {
+      name: 'RSA-PSS',
+      hash: 'SHA-256'
+    },
+    true,
+    [private?'sign':'verify']);
+  return imported;
+}
+async function getRSAKeyFromPublic64(public) {
+  return await window.crypto.subtle.importKey('spki',
+    base64ToBuffer(public),
+    {
+      name: 'RSA-OAEP',
+      hash: 'SHA-256'
+    },
+    true,
+    ['encrypt']);
+}
+window.keyPair = {};
+async function getRSAKeyPair() {
+  if (window.keyPair[window.currentServer]) return window.keyPair[window.currentServer];
+  const publicKey = await getRSAKeyFromPublic64(localStorage.getItem(window.currentServer+'-publicKey'));
+  const privateKey = await window.crypto.subtle.importKey('pkcs8',
+    base64ToBuffer(localStorage.getItem(window.currentServer+'-privateKey')),
+    {
+      name: 'RSA-OAEP',
+      hash: 'SHA-256'
+    },
+    true,
+    ['decrypt']);
+
+  window.keyPair[window.currentServer] = { publicKey, privateKey };
+  return window.keyPair[window.currentServer];
+}
+const RSAlabel = new TextEncoder().encode('parley');
+async function encryptRSAString(string, key) {
+  const encoder = new TextEncoder();
+  let data = encoder.encode(string);
+  return bufferToBase64(await window.crypto.subtle.encrypt({ name: 'RSA-OAEP', label: RSAlabel }, key, data))
+}
+async function decryptRSAString(string, key) {
+  const decoder = new TextDecoder();
+  return decoder.decode(await window.crypto.subtle.decrypt({ name: 'RSA-OAEP', label: RSAlabel }, key, base64ToBuffer(string)));
+}
+async function signRSAString(string, key) {
+  const encoder = new TextEncoder();
+  let data = encoder.encode(string);
+  return bufferToBase64(await window.crypto.subtle.sign({ name: 'RSA-PSS', saltLength: 222 }, await OAEPtoPSS(key, true), data))
+}
+async function verifyRSAString(string, signature, key) {
+  const encoder = new TextEncoder();
+  let data = encoder.encode(string);
+  return (await window.crypto.subtle.verify({ name: 'RSA-PSS', saltLength: 222 }, await OAEPtoPSS(key, false), base64ToBuffer(signature), data));
+}
+
+async function newAESKey() {
+  const key = await window.crypto.subtle.generateKey({
+      name: 'AES-GCM',
+      length: 256
+    },
+    true,
+    ['encrypt', 'decrypt']);
+
+  return key;
+}
+async function AESKeyToBase64(key) {
+  return bufferToBase64(await window.crypto.subtle.exportKey('raw', key));
+}
+async function base64ToAESKey(key) {
+  return await window.crypto.subtle.importKey(
+    'raw',
+    base64ToBuffer(key),
+    { name: 'AES-GCM' },
+    true,
+    ['encrypt', 'decrypt']
+  );
+}
+async function encryptAES(data, key) {
+  if (typeof data==='string') data = (new TextEncoder()).encode(data);
+  let iv = window.crypto.getRandomValues(new Uint8Array(12));
+  return { data: bufferToBase64(await window.crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, data)), iv: bufferToBase64(iv) };
+}
+async function decryptAES(data, key, iv) {
+  return await window.crypto.subtle.decrypt({ name: 'AES-GCM', iv: base64ToBuffer(iv) }, key, base64ToBuffer(data));
+}
+
+async function backendfetch(url, opts={}) {
+  if (!opts.headers) opts.headers = {};
+  opts.headers.authorization = 'Bearer '+localStorage.getItem(window.currentServer+'-sessionToken');
+  let req = await fetch(getCurrentServerUrl()+url, opts);
+  let res = await req.json();
+  if (req.status===419) {
+    await new Promise((resolve)=>{solveChallenge(res.challenge, res.id, resolve)});
+    return await backendfetch(url, opts);
+  } else {
+    if (opts.passstatus) res.status = req.status;
+    return res;
+  }
+}
+
+async function solveChallenge(challenge, id, callback) {
+  if (!challenge || !id) throw new Error('Missing data');
+  let formData = new FormData();
+  formData.append('id', id);
+  let keys = await getRSAKeyPair();
+  if (!keys) throw new Error('Missing keys');
+  formData.append('solve', await decryptRSAString(challenge, keys.privateKey));
+
+  let req = await fetch(getCurrentServerUrl()+`/api/v1/solve`, {
+    method: 'POST',
+    body: formData
+  });
+  if (req.status===200) {
+    let res = await req.json();
+    localStorage.setItem(window.currentServer+'-sessionToken', res.session);
+    callback(res);
+    return;
+  } else {
+    // Uh, very temp
+    console.log(id, challenge, keys.privateKey);
+    alert('Failed decoding, private and public match?');
+  }
+}
+
+window.keys = {};
+function getKeyContents(id, key, callback=()=>{}) {
+  if (!window.keys[id]) window.keys[id] = {};
+  if (window.keys[id][key]) {
+    callback();
+    return;
+  }
+  backendfetch('/api/v1/key/'+key)
+    .then(data=>{
+      if (!data.success) {
+        callback();
+        return;
+      }
+      if (data.expires_at.toString().length===10) data.expires_at*=1000;
+      window.keys[id][key] = data;
+      callback();
+    });
+}
+function getKeysBatch(id, keys, callback=()=>{}) {
+  if (!keys || keys.filter(k=>k!==null).length<1) {
+    callback();
+    return;
+  }
+  if (!window.keys[id]) window.keys[id] = {};
+  backendfetch('/api/v1/keys', {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json'
+    },
+    body: JSON.stringify(keys)
+  })
+    .then(data=>{
+      if (!Array.isArray(data)) {
+        callback();
+        return;
+      }
+      data.forEach(key=>{
+        window.keys[id][key.key_id] = key;
+      });
+      callback();
+    });
+}
+function getCurrentKeyChannel(ch, callback=()=>{}) {
+  if (!window.keys[ch]) window.keys[ch] = {};
+  let last = Object.keys(window.keys[ch]).reduce((a,b)=>window.keys[ch][a]?.expires_at>window.keys[ch][b]?.expires_at?a:b, '');
+  if (!last || Date.now()>window.keys[ch][last].expires_at) {
+    backendfetch(`/api/v1/channel/${ch}/key`)
+      .then(async(key)=>{
+        if (!key.key_id || window.keys[ch][key.key_id]) {
+          callback();
+          return;
+        }
+        getKeyContents(ch, key.key_id, callback);
+      })
+      .catch(()=>{
+        callback();
+      });
+  } else {
+    callback();
+  }
+}
+
+let pfpSize = 256;
+let pfpFormat = 'image/webp';
+let pfpQuality = 0.9;
+function processImageToPfp(file) {
+  return new Promise((resolve, reject) => {
+    // Load image
+    const img = new Image();
+    img.src = URL.createObjectURL(file);
+    img.onload = () => {
+      // Create canvas
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+
+      canvas.width = pfpSize;
+      canvas.height = pfpSize;
+
+      let ratio = img.width / img.height;
+      let srcX = 0, srcY = 0, srcW = img.width, srcH = img.height;
+
+      // Ratio > 1 then width > height
+      if (ratio > 1) {
+        srcW = img.height;
+        srcX = (img.width - srcW) / 2;
+      } else {
+        srcH = img.width;
+        srcY = (img.height - srcH) / 2;
+      }
+
+      // Draw image
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(img, srcX, srcY, srcW, srcH, 0, 0, pfpSize, pfpSize);
+
+      // Convert
+      canvas.toBlob((blob) => {
+        if (!blob) reject();
+        URL.revokeObjectURL(img.src);
+        canvas.remove();
+        resolve(blob);
+      }, pfpFormat, pfpQuality);
+    };
+  });
+}
+
+function notify(type, data, context=null) {
+  if (window.HoltNative) return; // native app shows background notifications itself; the Web Notification API is unavailable in the WebView
+  if (localStorage.getItem('pnotif')==='false') return;
+  if (window.myStatus==='dnd') return;
+  if (Notification.permission !== 'granted') {
+    localStorage.setItem('pnotif','false');
+    let s = document.getElementById('s-notif');
+    if (s) s.checked = false;
+    return;
+  }
+  let base = {
+    badge: './favicon.ico',
+    silent: false,
+    dir: localStorage.getItem('prtl')==='true'?'rtl':'ltr',
+    lang: localStorage.getItem('language')??'en'
+  };
+  if (context) {
+    base.renotify = true;
+    base.tag = type+'-'+context;
+  }
+  switch(type) {
+    case 'message':
+      base.timestamp = data.timestamp;
+      if (data.content) base.body = data.content;
+      if (data.user.pfp) base.icon = '/pfp/'+data.user.pfp;
+      let att = data.attachments.filter(att=>att.mimetype.startsWith('image/'));
+      if (att[0]) base.image = '/attachment/'+att[0].id;
+      let notif = new Notification(data.user.display??data.user.username, base);
+      notif.onclick = (evt)=>{
+        evt.preventDefault();
+        window.focus();
+        if (window.currentChannel!==context) loadChannel(context);
+      };
+      playSFX('notification');
+      break;
+    case 'call_start':
+      base.timestamp = Date.now();
+      let caller = data.started_by?(UserStore.get(data.started_by)?.display??'@'+data.started_by):'Someone';
+      let ch = window.channels?.find(c=>c.id===data.channel_id);
+      let inGroup = ch&&ch.type!==1;
+      let reps = inGroup?[caller, ch.name]:[caller];
+      getTranslation(inGroup?'channel.callincoming.in':'channel.callincoming')
+        .then(t=>{
+          let i = 0;
+          let notif = new Notification(t.replace(/\{\}/g, ()=>reps[i++]??''), base);
+          notif.onclick = (evt)=>{
+            evt.preventDefault();
+            window.focus();
+          };
+        });
+      playSFX('notification');
+      break;
+  }
+}
+
+const sfxCategories = { message: 'message', notification: 'notification', 'call-incoming': 'call', 'call-join': 'call', 'call-leave': 'call', mute: 'call', unmute: 'call' };
+function sfxVolume(cat) {
+  let v = localStorage.getItem('psfx-'+cat);
+  return Math.max(0, Math.min(100, Number(v??60)))/100;
+}
+function playSFX(name) {
+  let cat = sfxCategories[name];
+  if (!cat) return;
+  let vol = sfxVolume(cat);
+  if (vol<=0) return;
+  let audio = new Audio('./media/sfx/'+name+'.wav');
+  audio.volume = vol;
+  audio.play().catch(()=>{});
+}
+window.playSFX = playSFX;
+let callRing = null;
+window.playCallRing = (sound='call-incoming')=>{
+  if (callRing) return;
+  let vol = sfxVolume('call');
+  if (vol<=0) return;
+  callRing = new Audio('./media/sfx/'+sound+'.wav');
+  callRing.loop = true;
+  callRing.volume = vol;
+  callRing.play().catch(()=>{});
+};
+window.stopCallRing = ()=>{
+  if (!callRing) return;
+  callRing.pause();
+  callRing = null;
+};

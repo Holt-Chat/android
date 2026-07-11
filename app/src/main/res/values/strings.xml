@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <string name="app_name">Holt</string>
+  <string name="notif_channel_service">Connection</string>
+  <string name="notif_channel_messages">Messages</string>
+  <string name="notif_service_title">Holt is connected</string>
+  <string name="notif_service_text">Listening for new messages</string>
+  <string name="offline">No connection</string>
+  <string name="new_message">New message</string>
+  <string name="cache_cleared">Cache cleared</string>
+  <string name="update_title">Update available</string>
+  <string name="update_message">Holt %1$s is available. You\'re on %2$s.</string>
+  <string name="update_now">Update now</string>
+  <string name="update_skip">Skip</string>
+  <string name="update_never">Don\'t remind me again</string>
+</resources>

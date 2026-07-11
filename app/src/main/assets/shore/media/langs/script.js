@@ -1,0 +1,123 @@
+// Try to get the best match
+const default_lang = 'en-US';
+const languages = {
+  'en-US': 'en-US',
+  'en-GB': 'en-US',
+  'en': 'en-US',
+  'es-ES': 'es-ES',
+  'es-419': 'es-ES',
+  'es': 'es-ES',
+  'fa': 'fa',
+  'nl-NL': 'nl-NL',
+  'nl': 'nl-NL',
+  'tok': 'tok',
+  'en-UWU': 'uwu',
+  'uwu': 'uwu'
+};
+
+// Try to get the user langs
+function getUserLang() {
+  return languages[localStorage.getItem('language')]??languages[navigator.language]??languages[navigator.language.split('-')[0]]??default_lang;
+}
+
+// Fallback if no caches support
+window.cache = window.caches;
+let patchCache = ()=>{
+  window._caches = {};
+  window.cache = {
+    open: async(id)=>{
+      if (!window._caches[id]) window._caches[id] = {};
+      return {
+        match: async(di)=>window._caches[id][di],
+        put: async(di,req)=>{window._caches[id][di]=req}
+      };
+    },
+    delete: (id)=>{delete window._caches[id]}
+  };
+};
+if (!window.cache) {
+  patchCache();
+} else {
+  try {
+    window.cache.open('lang-cache-'+default_lang);
+  } catch(err) {
+    if (err.msg.includes('operation is insecure')) patchCache();
+  }
+}
+
+// Fetch the translation file
+let mcache = {};
+async function getTranslationFile(lang) {
+  if (mcache[lang]) return mcache[lang];
+  const url = `./media/langs/${lang}.json`;
+  // Network-first: always prefer the live file so newly shipped strings appear immediately (cache-first served stale
+  // translations and blanked any keys added since the cache was filled). The cache is only an offline fallback.
+  let p = fetch(url)
+    .then(async(response)=>{
+      if (!response||!response.ok) throw new Error('bad response');
+      window.cache.open('lang-cache-'+lang).then(cache=>cache.put(url, response.clone()).catch(()=>{})).catch(()=>{});
+      return response.json();
+    })
+    .catch(async()=>{
+      let cache = await window.cache.open('lang-cache-'+lang);
+      let cached = await cache.match(url);
+      return cached?cached.json():{};
+    });
+  mcache[lang] = p;
+  return p;
+}
+
+// Find all elements with lang attribute and translate
+function translate(attempt=0) {
+  let locale = getUserLang();
+  document.querySelector('html').lang = locale.replace('tok','art-x-tokipona'); // Lang attribute doesn't support 3 letter variant so use longhand
+  getTranslationFile(locale)
+    .then(file=>{
+      document.querySelectorAll('*:not(html)[tlang]').forEach(elem=>{
+        let trans = file[elem.getAttribute('tlang')];
+        if (trans===undefined) {
+          console.log('Missing translation for '+elem.getAttribute('tlang'), elem);
+          if (attempt<2) translate(attempt+1);
+          window.cache.delete('lang-cache-'+locale);
+          delete mcache[locale];
+          return;
+        }
+        if (['input','textarea'].includes(elem.tagName.toLowerCase())) {
+          if (elem.getAttribute('placeholder')===trans) return;
+          elem.setAttribute('placeholder', trans);
+          return;
+        }
+        if (elem.tagName.toLowerCase()==='img') {
+          if (elem.getAttribute('alt')===trans) return;
+          elem.setAttribute('alt', trans);
+          elem.setAttribute('title', trans);
+          return;
+        }
+        if (['button','span'].includes(elem.tagName.toLowerCase())&&elem.querySelector('svg,img')) {
+          if (elem.getAttribute('aria-label')===trans) return;
+          elem.setAttribute('aria-label', trans);
+          elem.setAttribute('title', trans);
+          return;
+        }
+        if (elem.innerText===trans) return;
+        elem.innerText = trans;
+      })
+    });
+}
+async function getTranslation(name) {
+  let file = await getTranslationFile(getUserLang());
+  return file[name]??'';
+}
+if (!localStorage.getItem('language')) localStorage.setItem('language', getUserLang());
+window.translate = translate;
+window.getTranslation = getTranslation;
+
+window.addEventListener('DOMContentLoaded', ()=>{
+  translate();
+
+  const observer = new MutationObserver(translate);
+  observer.observe(document.body, {
+    attributes: true,
+    subtree: true
+  });
+});

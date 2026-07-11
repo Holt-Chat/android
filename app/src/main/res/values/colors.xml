@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <color name="holt_bg">#141219</color>
+  <color name="holt_bg_light">#FBFAFC</color>
+  <color name="holt_accent">#7C5CFF</color>
+  <color name="white">#FFFFFF</color>
+  <color name="black">#000000</color>
+</resources>

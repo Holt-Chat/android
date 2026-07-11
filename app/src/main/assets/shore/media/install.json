@@ -1,0 +1,24 @@
+{
+  "name": "Holt",
+  "short_name": "Holt",
+  "scope": "/",
+  "start_url": "/",
+  "display": "standalone",
+  "display_override": ["minimal-ui"],
+  "theme_color": "#141219",
+  "background_color": "#141219",
+  "description": "Holt, a secure end to end encrypted messaging web app.",
+  "icons": [
+    {
+      "src": "/media/holt.png",
+      "type": "image/png",
+      "sizes": "512x512"
+    },
+    {
+      "src": "/media/holt.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}
