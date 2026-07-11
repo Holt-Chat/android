@@ -2648,6 +2648,43 @@ code {
 .comp-btn.success { background: #3ba55c; color: #fff; }
 .comp-btn.danger { background: #ed4245; color: #fff; }
 .comp-btn.link { background: none; color: var(--accent); padding: 4px 2px; text-decoration: underline; font-weight: 400; }
+.msg-reactions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+}
+.reaction-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border-radius: var(--roundness-1);
+  background: var(--bg-3);
+  border: 1px solid var(--bg-4);
+  font-size: 0.85rem;
+  cursor: pointer;
+  font-family: inherit;
+  transition: filter 0.1s, border-color 0.1s;
+}
+.reaction-chip:hover:not(:disabled) { filter: brightness(1.15); }
+.reaction-chip:disabled { cursor: default; opacity: 0.75; }
+.reaction-chip.mine { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 18%, var(--bg-3)); }
+.reaction-count { color: var(--text-2); font-size: 0.8rem; font-weight: 600; }
+.reaction-unverified {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 13px;
+  height: 13px;
+  border-radius: var(--roundness-1);
+  background: var(--invalid);
+  color: #fff;
+  font-size: 0.65rem;
+  font-weight: 700;
+  line-height: 1;
+}
 #iact-modal-dlg {
   background: var(--bg-2);
   border: 1px solid var(--bg-3);

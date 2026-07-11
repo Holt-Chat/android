@@ -192,6 +192,8 @@
 	"message.edited": "(ویرایش شده)",
 	"message.pin": "سنجاق",
 	"message.unpin": "برداشتن سنجاق",
+	"message.reaction.add": "افزودن واکنش",
+	"message.reaction.unverified": "نمی‌توان یک یا چند مورد از این واکنش‌ها را تأیید کرد",
 	"message.emoji": "ایموجی",
 	"format.bold": "ضخیم",
 	"format.italic": "مورب",

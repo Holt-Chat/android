@@ -1,5 +1,6 @@
 let onlineServers = {};
 let extraServers = {};
+let checkingServers = {};
 window.servers = JSON.parse(localStorage.getItem('servers'))??[];
 
 function normalizeServer(url) {
@@ -8,21 +9,29 @@ function normalizeServer(url) {
 async function checkServer(url) {
   url = normalizeServer(url);
   if (onlineServers[url]!==undefined) return onlineServers[url];
-  onlineServers[url] = false;
-
-  let res;
-  try {
-    res = await fetch(url+'/api/v1', {
-      redirect: 'follow'
-    })
-    res = await res.json();
-  } catch(err) {
-    res = {};
-  }
-  window.serverData[url] = res;
-  onlineServers[url] = (res.running==='Holt'&&backendVersions.includes(res.version));
-  extraServers[url] = { dev: res.dev??false, vermiss: !backendVersions.includes(res.version) };
-  return onlineServers[url];
+  if (checkingServers[url]) return checkingServers[url];
+  checkingServers[url] = (async()=>{
+    let res;
+    try {
+      res = await fetch(url+'/api/v1', {
+        redirect: 'follow'
+      })
+      res = await res.json();
+    } catch(err) {
+      res = {};
+    }
+    // A failed/unreachable attempt is left undefined (not cached as offline) so the
+    // periodic check keeps retrying it instead of getting stuck greyed-out until reload.
+    let ok = (res.running==='Holt'&&backendVersions.includes(res.version));
+    if (ok) {
+      window.serverData[url] = res;
+      onlineServers[url] = true;
+      extraServers[url] = { dev: res.dev??false, vermiss: !backendVersions.includes(res.version) };
+    }
+    delete checkingServers[url];
+    return ok;
+  })();
+  return checkingServers[url];
 }
 
 let curServerTime = null;

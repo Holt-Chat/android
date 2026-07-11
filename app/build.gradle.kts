@@ -21,8 +21,8 @@ android {
     applicationId = "chat.holt.android"
     minSdk = 24
     targetSdk = 34
-    versionCode = 15
-    versionName = "1.1.4"
+    versionCode = 16
+    versionName = "1.1.5"
   }
 
   signingConfigs {

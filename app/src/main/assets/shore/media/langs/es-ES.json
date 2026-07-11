@@ -192,6 +192,8 @@
 	"message.edited": "(Editado)",
 	"message.pin": "Fijar",
 	"message.unpin": "Desfijar",
+	"message.reaction.add": "Añadir reacción",
+	"message.reaction.unverified": "No se ha podido verificar una o más de estas reacciones",
 	"message.emoji": "Emoji",
 	"format.bold": "Negrita",
 	"format.italic": "Cursiva",

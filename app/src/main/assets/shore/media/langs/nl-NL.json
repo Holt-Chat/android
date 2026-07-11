@@ -198,6 +198,8 @@
 	"message.edited": "(Bewerkt)",
 	"message.pin": "Vastzetten",
 	"message.unpin": "Losmaken",
+	"message.reaction.add": "Reactie toevoegen",
+	"message.reaction.unverified": "Kon een of meer van deze reacties niet verifiëren",
 	"message.delete": "Verwijderen",
 	"message.delete.empty": "Delete message?",
 	"message.delete.empty.body": "Setting a message to empty will delete it.",

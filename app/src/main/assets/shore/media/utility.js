@@ -5,10 +5,11 @@ const Permissions = {
   MANAGE_MESSAGES: 8,
   MANAGE_MEMBERS: 16,
   MANAGE_CHANNEL: 32,
-  MANAGE_PERMISSION: 64
+  MANAGE_PERMISSION: 64,
+  ADD_REACTIONS: 128
 };
-const OwnerAlt = 127;
-const AdminAlt = 126;
+const OwnerAlt = 255;
+const AdminAlt = 254;
 const DummyUser = {
   display: 'Reserved',
   username: 'r',

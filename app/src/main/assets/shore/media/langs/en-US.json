@@ -192,6 +192,8 @@
 	"message.edited": "(Edited)",
 	"message.pin": "Pin",
 	"message.unpin": "Unpin",
+	"message.reaction.add": "Add reaction",
+	"message.reaction.unverified": "Could not verify one or more of these reactions",
 	"message.emoji": "Emoji",
 	"format.bold": "Bold",
 	"format.italic": "Italic",

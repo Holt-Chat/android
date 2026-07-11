@@ -192,6 +192,8 @@
 	"message.edited": "(ante)",
 	"message.pin": "O awen",
 	"message.unpin": "O weka awen",
+	"message.reaction.add": "O pana e pilin",
+	"message.reaction.unverified": "Ken ala sona e pilin ni",
 	"message.emoji": "Sitelen toki",
 	"format.bold": "nimi wawa",
 	"format.italic": "nimi tawa",

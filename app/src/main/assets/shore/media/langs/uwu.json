@@ -192,6 +192,8 @@
 	"message.edited": "(Edited)",
 	"message.pin": "Pin",
 	"message.unpin": "Unpin",
+	"message.reaction.add": "Add weaction",
+	"message.reaction.unverified": "Couwd not vewify one ow mowe of dese weactions",
 	"message.emoji": "Emoji",
 	"format.bold": "Bowd",
 	"format.italic": "Itawic",

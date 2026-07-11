@@ -165,6 +165,7 @@ function mdRedo() { if (mdHistoryIndex<mdHistory.length-1) { mdHistoryIndex++; m
 window.presence = window.presence??{};
 window.lastSeen = window.lastSeen??{};
 window.myStatus = window.myStatus??'online';
+window.myShareTyping = window.myShareTyping??true;
 window.typingUsers = window.typingUsers??{};
 window.activeCalls = window.activeCalls??{};
 let lastActivity = Date.now();
@@ -202,6 +203,7 @@ async function setMyStatus(status, auto=false) {
 }
 window.setMyStatus = setMyStatus;
 function setPrivacyShare(field, value) {
+  if (field==='share_typing') window.myShareTyping = value;
   let f = new FormData();
   f.append(field, value?'1':'0');
   backendfetch('/api/v1/me/status', {method: 'PATCH', body: f});
@@ -219,6 +221,7 @@ window.setPrivacyShare = setPrivacyShare;
 let lastTypingSent = 0;
 messageInput.addEventListener('input', ()=>{
   if (!window.currentChannel||![1,2].includes(window.currentChannelType)) return;
+  if (!window.myShareTyping||window.myStatus==='invisible') return;
   let now = Date.now();
   if (now-lastTypingSent<3500) return;
   lastTypingSent = now;
@@ -1015,13 +1018,45 @@ document.body.ondragover = (evt)=>{
 };
 const emojiButton = document.getElementById('emoj');
 const emojiPicker = document.querySelector('emoji-picker');
-emojiButton.onclick = ()=>{
-  emojiPicker.style.display = emojiPicker.style.display===''?'none':'';
+let reactionPickerTarget = null;
+function closeEmojiPicker() {
+  emojiPicker.style.display = 'none';
+  reactionPickerTarget = null;
+}
+emojiButton.onclick = (event)=>{
+  event.stopPropagation();
+  if (emojiPicker.style.display===''&&!reactionPickerTarget) { closeEmojiPicker(); return; }
+  reactionPickerTarget = null;
+  emojiPicker.style.display = '';
   let b = emojiButton.getBoundingClientRect();
   emojiPicker.style.left = b.right+'px';
   emojiPicker.style.top = b.top+'px';
 };
+window.openReactionPicker = (event, el)=>{
+  event.stopPropagation();
+  if (emojiPicker.style.display===''&&reactionPickerTarget?.messageId===el.dataset.msgId) { closeEmojiPicker(); return; }
+  reactionPickerTarget = { channelId: el.dataset.chId, messageId: el.dataset.msgId };
+  emojiPicker.style.display = '';
+  let b = el.getBoundingClientRect();
+  emojiPicker.style.left = Math.min(b.right, window.innerWidth-320)+'px';
+  emojiPicker.style.top = Math.min(b.top, window.innerHeight-420)+'px';
+};
+document.addEventListener('click', (evt)=>{
+  if (!evt.target.isConnected) return;
+  if (emojiPicker.style.display!=='') return;
+  if (emojiPicker.contains(evt.target)) return;
+  if (evt.target===emojiButton||evt.target.closest?.('[aria-label="Add reaction"]')) return;
+  closeEmojiPicker();
+});
 emojiPicker.addEventListener('emoji-click', (evt)=>{
+  if (reactionPickerTarget) {
+    let { channelId, messageId } = reactionPickerTarget;
+    let existing = document.querySelector(`.reaction-chip.mine[data-msg-id="${CSS.escape(messageId)}"][data-emoji="${CSS.escape(evt.detail.unicode)}"]`);
+    if (existing) window.removeReaction(channelId, messageId, existing.dataset.mineId);
+    else window.addReaction(channelId, messageId, evt.detail.unicode);
+    closeEmojiPicker();
+    return;
+  }
   let emoji = `:${evt.detail.emoji.shortcodes.toSorted((a,b)=>a.length-b.length)[0]}:${evt.detail.skinTone!==0&&evt.detail.emoji.skins?`:tone${evt.detail.skinTone}:`:''}`;
   let start = messageInput.value.substring(0, messageCursorStart);
   let end = messageInput.value.substring(messageCursorEnd, messageInput.value.length);
@@ -1029,6 +1064,36 @@ emojiPicker.addEventListener('emoji-click', (evt)=>{
   messageCursorStart += emoji.length;
   messageCursorEnd = messageCursorStart;
 });
+window.toggleReaction = (el)=>{
+  if (el.disabled) return;
+  let { chId, msgId, emoji, mineId } = el.dataset;
+  if (mineId) window.removeReaction(chId, msgId, mineId);
+  else window.addReaction(chId, msgId, emoji);
+};
+window.addReaction = async(channelId, messageId, emoji)=>{
+  let ch = window.channels.find(c=>c.id===channelId);
+  if (!ch) return;
+  let sdate = Math.ceil(Date.now()/1000);
+  let signat = `${emoji}:${channelId}:${messageId}:${sdate}`;
+  let skey = await getRSAKeyPair();
+  let signature = await signRSAString(signat, skey.privateKey);
+  let body = { content: emoji, timestamp: sdate, signature };
+  if (ch.type!==3) {
+    let { nkey, keyId } = await getChannelAESKey(channelId);
+    let enc = await encryptAES(emoji, nkey);
+    body.content = enc.data;
+    body.key = keyId;
+    body.iv = enc.iv;
+  }
+  backendfetch(`/api/v1/channel/${channelId}/message/${messageId}/reactions`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+};
+window.removeReaction = (channelId, messageId, reactionId)=>{
+  backendfetch(`/api/v1/channel/${channelId}/message/${messageId}/reactions/${reactionId}`, { method: 'DELETE' });
+};
 window.insertTimestampToken = ()=>{
   let popover = document.getElementById('tsgenPopover');
   let unix = Math.floor(new Date(popover.querySelector('input').value).getTime()/1000);
@@ -1649,6 +1714,47 @@ function decodeMessage(msg, ch=window.currentChannel) {
     });
   });
 }
+function decodeReaction(r, ch) {
+  if (!(r.content&&r.key&&r.iv)) return Promise.resolve(r.content);
+  return new Promise(resolve=>{
+    getKeyContents(ch, r.key, async()=>{
+      try {
+        const privateKey = (await getRSAKeyPair()).privateKey;
+        let nkey = await base64ToAESKey(await decryptRSAString(window.keys[ch][r.key].key, privateKey));
+        resolve((new TextDecoder()).decode(await decryptAES(r.content, nkey, r.iv)));
+      } catch(err) {
+        console.warn('Could not decrypt reaction', r.id, err);
+        resolve(null);
+      }
+    });
+  });
+}
+async function buildReactionsHtml(msg, ch) {
+  if (!msg.reactions?.length) return '';
+  let canReact = hasPerm(ch.permission, Permissions.ADD_REACTIONS);
+  let decoded = (await Promise.all(msg.reactions.map(async r=>{
+    let content = await decodeReaction(r, ch.id);
+    if (content==null) return null;
+    let verified = null;
+    if (r.signature&&r.user?.username&&PKStore.has(r.user.username)) {
+      verified = await verifyRSAString(`${content}:${ch.id}:${msg.id}:${r.signed_timestamp}`, r.signature, await getRSAKeyFromPublic64(PKStore.get(r.user.username)));
+    }
+    return {...r, decoded: content, verified};
+  }))).filter(Boolean);
+  if (!decoded.length) return '';
+  let groups = new Map();
+  for (let r of decoded) {
+    if (!groups.has(r.decoded)) groups.set(r.decoded, []);
+    groups.get(r.decoded).push(r);
+  }
+  let chips = [...groups.entries()].map(([emoji, reactions])=>{
+    let mine = reactions.find(r=>r.user?.username===window.username);
+    let unverified = reactions.some(r=>r.signature&&r.user?.username&&r.verified===false);
+    let names = reactions.map(r=>r.user?.display??r.user?.username).filter(Boolean).join(', ');
+    return `<button class="reaction-chip${mine?' mine':''}"${canReact?'':' disabled'} data-emoji="${sanitizeAttr(emoji)}" data-msg-id="${sanitizeMinimChars(msg.id)}" data-ch-id="${sanitizeMinimChars(ch.id)}" data-mine-id="${sanitizeMinimChars(mine?.id??'')}" title="${sanitizeAttr(names)}" onclick="window.toggleReaction(this)">${sanitizeHTML(emoji)}<span class="reaction-count">${reactions.length}</span>${unverified?`<span class="reaction-unverified" aria-label="Could not verify one or more of these reactions" title="Could not verify one or more of these reactions" tlang="message.reaction.unverified">!</span>`:''}</button>`;
+  }).join('');
+  return `<div class="msg-reactions">${chips}</div>`;
+}
 function uiLocale() {
   return localStorage.getItem('timeUILang')==='true'?localStorage.getItem('language'):navigator.language;
 }
@@ -1983,6 +2089,7 @@ async function displayMessage(msg, ch, limited=0) {
   if (msg._interactionItem) return renderInteractionHistoryItem(msg);
   let sendm = hasPerm(ch.permission,Permissions.SEND_MESSAGES);
   let mangm = hasPerm(ch.permission,Permissions.MANAGE_MESSAGES);
+  let canreact = hasPerm(ch.permission,Permissions.ADD_REACTIONS);
   // Decrypt
   if (msg.error==='pin_before_join') {
     msg.content = await getTranslation('message.pin.unavailable');
@@ -2018,11 +2125,13 @@ async function displayMessage(msg, ch, limited=0) {
   if (embedRun.length) bodyHtml += `<div class="embeds">${embedRun.join('')}</div>`;
   if (lastText===-1&&trailerHtml) bodyHtml += `<span class="content">${trailerHtml}</span>`;
   let inviteCodes = [...new Set([...msg.content.matchAll(/#([a-zA-Z0-9_\-]{3,20})(?=$|\s|\*|\_|\~|<|#)/g)].map(m=>m[1]))].slice(0,3);
+  let reactionsHtml = await buildReactionsHtml(msg, ch);
   return `<div class="message${msg.ghost?' ghost-'+msg.ghost:''}${(new RegExp('@('+window.username+'|e)(?![a-zA-Z0-9_\\-])','im')).test(msg.content)||(msg.replied_to&&msg.reply?.user?.username===window.username)?' mention':''}${window.username===msg.user.username?' self':''}${msg.user.hide?' grouped':''}" id="m-${sanitizeMinimChars(msg.id)}">
   ${msg.user.hide?`<span class="time">${formatHour(msg.timestamp)}</span>`:`<div class="avatar"><span class="av"${presenceData(msg.user.username)}><img src="${msg.user.pfp?pfpById(msg.user.pfp):userToDefaultPfp(msg.user)}" width="42" height="42" aria-hidden="true" onerror="this.src='${userToDefaultPfp(msg.user)}'"></span></div>`}
   <div class="inner">
     <div class="actions">
       ${limited===0?`
+      ${canreact?`<button data-msg-id="${sanitizeMinimChars(msg.id)}" data-ch-id="${sanitizeMinimChars(ch.id)}" onclick="window.openReactionPicker(event, this)" aria-label="Add reaction" tlang="message.reaction.add"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 256 256"><path d="M108 0H148V108H256V148H148V256H108V148H0V108H108V0Z"/></svg></button>`:''}
       ${sendm?`<button data-id="${sanitizeMinimChars(msg.id)}" data-display="${sanitizeAttr(msg.user.display??sanitizeMinimChars(msg.user.username??''))}" onclick="window.replyMessage(this.dataset.id, desanitizeAttr(this.dataset.display))" aria-label="Reply" tlang="message.reply"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 256 256"><path d="M42 108H196V108C229.137 108 256 134.863 256 168V168V199.85C256 210.896 247.046 219.85 236 219.85V219.85C224.954 219.85 216 210.896 216 199.85V168V168C216 156.954 207.046 148 196 148V148H42V108Z"/><path d="M79.746 41.1778C83.0613 37.8625 87.5578 36 92.2464 36V36C107.996 36 115.883 55.0415 104.747 66.1782L47.2462 123.681C44.9032 126.024 44.9032 129.823 47.2462 132.166L104.747 189.67C115.883 200.806 107.996 219.848 92.2464 219.848V219.848C87.5579 219.848 83.0614 217.985 79.7461 214.67L5.72793 140.652C-1.30151 133.622 -1.30151 122.225 5.72793 115.196L79.746 41.1778Z"/></svg></button>`:''}
       ${msg.user.username===window.username?`<button data-id="${sanitizeMinimChars(msg.id)}" data-key="${sanitizeMinimChars(msg.key??'')}" data-content="${sanitizeAttr(msg.content)}" onclick="window.editMessage(this.dataset.id, this.dataset.key, this.parentElement.parentElement, this.dataset.content)" aria-label="Edit" tlang="message.edit"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 256 256"><path d="M36 198L87 239L213.98 78.9249L162.073 38.0226L36 198ZM170.11 27.8251L222.067 68.7297L239.674 46.5333C241.391 44.3698 241.028 41.2246 238.864 39.5086L194.819 4.5744C192.651 2.85464 189.498 3.22334 187.785 5.397L170.11 27.8251Z M35.1323 255.15C33.0948 255.784 31.0651 254.148 31.252 252.023L36 198L87.0001 239L35.1323 255.15Z"/></svg></button>`:''}
       ${ch.type===1||mangm?`<button onclick="window.pinMessage('${sanitizeMinimChars(msg.id)}', true)" aria-label="Pin" tlang="message.pin"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 256 256"><path d="M117.4 6.28699C118.758 0.114336 126.401 -2.11969 130.87 2.34949L253.649 125.126C258.118 129.595 255.883 137.239 249.71 138.597L206.755 148.044C204.89 148.454 203.182 149.39 201.832 150.74L181.588 170.983C180.637 171.934 179.889 173.067 179.386 174.313L154.115 236.957C151.434 243.603 142.838 245.354 137.771 240.287L95.5138 198.03L10.2823 254.884C7.65962 256.633 4.16588 256.288 1.93663 254.058C-0.292345 251.829 -0.63778 248.336 1.11143 245.714L57.964 160.48L15.7091 118.225C10.642 113.158 12.3932 104.562 19.0392 101.881L81.6827 76.6112C82.9295 76.1083 84.0621 75.3587 85.0128 74.4081L105.257 54.1649C106.607 52.8149 107.542 51.1066 107.952 49.2421L117.4 6.28699Z"/></svg></button>`:''}
@@ -2040,6 +2149,7 @@ async function displayMessage(msg, ch, limited=0) {
       ${msg.attachments.map(att=>attachToElem(att, msg.key??'')).join('')}
     </div>
     ${msg.components?.length?`<div class="msg-components">${msg.components.filter(r=>r.type===1).map(r=>`<div class="action-row">${r.components.filter(b=>b.type===2).map(b=>{let s=['','primary','secondary','success','danger','link'][b.style]||'secondary';return b.style===5?`<a href="${sanitizeAttr(b.url)}" target="_blank" class="comp-btn link">${sanitizeHTML(b.label)}</a>`:`<button class="comp-btn ${s}"${b.disabled?' disabled':''} data-msg-id="${sanitizeMinimChars(msg.id)}" data-cid="${sanitizeMinimChars(b.custom_id)}" onclick="window.clickComponent(this)">${sanitizeHTML(b.label)}</button>`;}).join('')}</div>`).join('')}</div>`:''}
+    ${reactionsHtml}
   </div>
 </div>`;
 }
@@ -3212,6 +3322,37 @@ function startStream() {
       showChannels(window.channels);
     }
   });
+  window.stream.addEventListener('reaction_add', async(event)=>{
+    let data = JSON.parse(event.data);
+    if (!window.messages[data.channel_id]) return;
+    let msg = window.messages[data.channel_id].find(m=>m.id===data.message_id);
+    if (!msg) return;
+    if (!msg.reactions) msg.reactions = [];
+    if (!msg.reactions.some(r=>r.id===data.reaction.id)) msg.reactions.push(data.reaction);
+    if (window.currentChannel===data.channel_id) {
+      let el = document.getElementById('m-'+data.message_id);
+      if (el) {
+        let ch = window.channels.find(c=>c.id===data.channel_id);
+        el.querySelector('.msg-reactions')?.remove();
+        el.querySelector('.inner').insertAdjacentHTML('beforeend', await buildReactionsHtml(msg, ch));
+      }
+    }
+  });
+  window.stream.addEventListener('reaction_remove', async(event)=>{
+    let data = JSON.parse(event.data);
+    if (!window.messages[data.channel_id]) return;
+    let msg = window.messages[data.channel_id].find(m=>m.id===data.message_id);
+    if (!msg||!msg.reactions) return;
+    msg.reactions = msg.reactions.filter(r=>r.id!==data.reaction_id);
+    if (window.currentChannel===data.channel_id) {
+      let el = document.getElementById('m-'+data.message_id);
+      if (el) {
+        let ch = window.channels.find(c=>c.id===data.channel_id);
+        el.querySelector('.msg-reactions')?.remove();
+        el.querySelector('.inner').insertAdjacentHTML('beforeend', await buildReactionsHtml(msg, ch));
+      }
+    }
+  });
   window.stream.addEventListener('call_start', (event)=>{
     let data = JSON.parse(event.data);
     // Replayed on every SSE connect for calls that were already active before we loaded.
@@ -4024,6 +4165,7 @@ window.showuserdata = (me)=>{
     window.myId = me.id;
     if (me.presence==='idle'&&me.status_auto) setMyStatus('online');
     else if (me.presence) window.myStatus = me.presence;
+    if ('share_typing' in me) window.myShareTyping = me.share_typing!==0;
     applyMyStatus();
     window.servers[window.servers.findIndex(srv=>srv.id===window.currentServer)].name = me.username;
     localStorage.setItem('servers', JSON.stringify(window.servers));
