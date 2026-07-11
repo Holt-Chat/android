@@ -1,10 +1,18 @@
 let onlineServers = {};
 let extraServers = {};
 let checkingServers = {};
+let retryAttempts = {};
+let nextRetryAt = {};
+const MAX_RETRY_ATTEMPTS = 8;
+const RETRY_BASE_DELAY = 200;
+const RETRY_MAX_DELAY = 15000;
 window.servers = JSON.parse(localStorage.getItem('servers'))??[];
 
 function normalizeServer(url) {
   return url.replaceAll(/\/+$/g,'');
+}
+function serverCheckDue(url) {
+  return onlineServers[url]===undefined && (!nextRetryAt[url] || Date.now()>=nextRetryAt[url]);
 }
 async function checkServer(url) {
   url = normalizeServer(url);
@@ -20,13 +28,18 @@ async function checkServer(url) {
     } catch(err) {
       res = {};
     }
-    // A failed/unreachable attempt is left undefined (not cached as offline) so the
-    // periodic check keeps retrying it instead of getting stuck greyed-out until reload.
     let ok = (res.running==='Holt'&&backendVersions.includes(res.version));
     if (ok) {
       window.serverData[url] = res;
       onlineServers[url] = true;
       extraServers[url] = { dev: res.dev??false, vermiss: !backendVersions.includes(res.version) };
+      retryAttempts[url] = 0;
+    } else {
+      // A failed/unreachable attempt backs off and retries (up to MAX_RETRY_ATTEMPTS) instead of
+      // getting stuck greyed-out until reload; once attempts are exhausted it settles on offline.
+      retryAttempts[url] = (retryAttempts[url]||0)+1;
+      if (retryAttempts[url]>=MAX_RETRY_ATTEMPTS) onlineServers[url] = false;
+      else nextRetryAt[url] = Date.now()+Math.min(RETRY_BASE_DELAY*(2**retryAttempts[url]), RETRY_MAX_DELAY);
     }
     delete checkingServers[url];
     return ok;
@@ -65,6 +78,7 @@ function showServerList() {
       ${extraServers[srv.url]?.vermiss?'<span title="There is a version missmatch">❌</span>':''}
     </span>
   </button>
+  ${!onlineServers[srv.url]?`<button class="retry" aria-label="Retry"><svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 256 256"><path d="M128 24C69.72 24 22 71.72 22 130H0L29.5 174.5L59 130H37C37 79.85 77.85 39 128 39C178.15 39 219 79.85 219 130C219 180.15 178.15 221 128 221C104.5 221 83.1 212.1 67 197.5L56.5 208.5C76 226.4 100.9 236 128 236C186.28 236 234 188.28 234 130C234 71.72 186.28 24 128 24Z"/></svg></button>`:''}
   <button class="del" aria-label="Remove server"><svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 256 256"><g transform="rotate(45 128 128)"><rect x="103" width="50" height="256" rx="25"/><rect y="103" width="256" height="50" rx="25"/></g></svg></button>
 </span>`)
     .join('');
@@ -74,6 +88,16 @@ function showServerList() {
       spn.setAttribute('selected', true);
       document.getElementById('server-select').removeAttribute('disabled');
     };
+    spn.querySelector('button.retry')?.addEventListener('click', (evt)=>{
+      evt.stopPropagation();
+      let url = normalizeServer(decodeURIComponent(spn.getAttribute('data-url')));
+      delete onlineServers[url];
+      delete nextRetryAt[url];
+      retryAttempts[url] = 0;
+      checkServer(url).then(()=>showServerList());
+      clearInterval(checkOnlineInter);
+      checkOnlineInter = setInterval(pollServers, 200);
+    });
     spn.querySelector('button.del').onclick = ()=>{
       let id = decodeURIComponent(spn.getAttribute('data-id'));
       window.servers = window.servers.filter(srv=>srv.id!==id);
@@ -160,18 +184,17 @@ window.currentServer = '';
   document.getElementById('server-modal').showModal();
 })();
 
-checkOnlineInter = setInterval(()=>{
-  let con = false;
+function pollServers() {
+  let pending = false;
   window.servers.forEach(srv=>{
-    if (con) return;
-    if (onlineServers[srv.url]===undefined) {
-      con = true;
-      checkServer(srv.url)
-        .then(()=>{
-          showServerList();
-        });
-      return;
-    }
+    if (onlineServers[srv.url]!==undefined) return;
+    pending = true;
+    if (!serverCheckDue(srv.url)) return;
+    checkServer(srv.url)
+      .then(()=>{
+        showServerList();
+      });
   });
-  if (!con) clearInterval(checkOnlineInter);
-}, 200);
+  if (!pending) clearInterval(checkOnlineInter);
+}
+checkOnlineInter = setInterval(pollServers, 200);

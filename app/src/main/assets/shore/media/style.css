@@ -463,6 +463,23 @@ dialog[open]::backdrop {
   color: var(--invalid);
   border-color: color-mix(in oklab, var(--invalid) 45%, var(--hairline));
 }
+#server-list button.retry {
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  padding: 0;
+  color: var(--text-2);
+  line-height: 1;
+}
+#server-list button.retry:hover, #server-list button.retry:focus-visible {
+  color: var(--accent);
+  border-color: color-mix(in oklab, var(--accent) 45%, var(--hairline));
+}
+#server-list button.retry:active svg {
+  transform: rotate(180deg);
+  transition: transform 0.3s;
+}
 
 .sm-actions {
   display: flex;
