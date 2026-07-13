@@ -719,6 +719,58 @@ dialog[open]::backdrop {
   border-color: color-mix(in oklab, var(--accent) 70%, var(--hairline));
   background-color: var(--bg-accent);
 }
+#signup-password {
+  padding: 30px 26px 26px;
+  min-width: 0;
+  max-width: min(340px, calc(100vw - 24px));
+  margin-inline: auto;
+  box-sizing: border-box;
+  text-align: center;
+}
+#signup-password .sp-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 50px;
+  height: 50px;
+  margin: 0 auto 16px;
+  border-radius: 50%;
+  background: color-mix(in oklab, var(--accent) 16%, var(--bg-2));
+  box-shadow: 0 0 0 6px color-mix(in oklab, var(--accent) 8%, transparent);
+  color: var(--accent);
+}
+#signup-password h2 {
+  margin: 0 0 6px;
+  font-size: 1.12rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+#signup-password p {
+  margin: 0 0 20px;
+  color: var(--text-2);
+  font-size: 0.85rem;
+  line-height: 1.4;
+}
+#signup-password .lx-input {
+  margin: 0 0 16px;
+  text-align: start;
+}
+#signup-password button {
+  width: 100%;
+  padding: 11px;
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: bold;
+  color: var(--text-1);
+  border: 1px var(--hairline) solid;
+  border-radius: var(--roundness-1);
+  background-color: var(--bg-2);
+  border-color: color-mix(in oklab, var(--accent) 50%, var(--hairline));
+}
+#signup-password button:hover, #signup-password button:focus-visible {
+  border-color: color-mix(in oklab, var(--accent) 70%, var(--hairline));
+  background-color: var(--bg-accent);
+}
 #bot-create .bot-note, #oauth-apps-modal .bot-note {
   margin: 0 0 4px;
   font-size: 0.85rem;
